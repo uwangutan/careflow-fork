@@ -1,17 +1,24 @@
 let currentCodeDisplay = document.getElementById('current-queue');
 let button = document.querySelector('.next-button');
-let form = document.getElementById('login-card');
+let formLogin = document.getElementById('login-card');
 let category;
 let code = 1;
 let codeCurrent = (category + code);
 
 
-form.addEventListener('submit', (e) => {
+formLogin.addEventListener('submit', async (e) => {
   e.preventDefault();
 
-  const email = form.email.value;
-  const password = form.password.value;
+  const email = formLogin.email.value;
+  const password = formLogin.password.value;
 
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+
+  await res.json();
   console.log(email, password);
 });
 

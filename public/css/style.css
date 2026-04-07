@@ -78,6 +78,17 @@ input[type="checkbox"]{
   gap: 10px;
 }
 
+#signup-card{
+  background-color: var(--green-card);
+  color: var(--gray);
+  padding: 20px;
+  width: 500px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .login-button{
   padding: 15px;
   margin: 12px 0;
