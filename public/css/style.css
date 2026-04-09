@@ -12,6 +12,10 @@
   padding: 0;
 }
 
+.category-identifier > button{
+  border-left: solid 4px var(--green-darker);
+  border-radius: 20px;
+}
 body{
   height: 100vh;
   font-family: "Rubik", sans-serif;
@@ -64,6 +68,16 @@ input[type="checkbox"]{
   justify-content: flex-end;
   align-items: center;
 }
+
+.user-main{
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  height: 100vh;
+  justify-content: center;
+  align-items: center;
+}
+
 #login-card h1{
   text-align: center;
 }
@@ -230,6 +244,7 @@ a{
 button{
   border: none;
   margin: 3px;
+  padding: 20px;
   text-align: center;
 }
 .next-button{

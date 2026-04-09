@@ -2,12 +2,14 @@ const express = require('express');
 const mariadb = require('mariadb');
 const dotenv = require('dotenv');
 const bcrypt = require('bcrypt');
+const session = require('express-session');
 
 dotenv.config();
 const app = express();
 
 app.use(express.json());
 app.use(express.static('public'));
+
 
 const pool = mariadb.createPool({
   host: process.env.DB_HOST,
@@ -16,12 +18,50 @@ const pool = mariadb.createPool({
   database: process.env.DB_NAME,
 });
 
+app.use(session({
+  secret: 'gumandoy',
+  resave: false,
+  saveUninitialized: true,
+  cookie: { secure: false }
+}));
+
 app.get('/login.html', (req, res) => {
   res.sendFile(__dirname + '/public/login.html');
 });
 
 app.get('/signup.html', (req, res) => {
   res.sendFile(__dirname + '/public/signup.html');
+});
+
+app.post('/api/queue', async (req, res) => {
+  console.log(req.body);
+
+  const uid = req.session.uid;
+  if (!uid) return res.status(401).json({ error: 'Not logged in' });
+  const { category, queueNumber } = req.body;
+  let categoryComplete = {
+    A: 'Aisthecategory',
+    B: 'Bisthecategory',
+    C: 'Cisthecategory'
+  };
+  let departmentName = categoryComplete[category];
+
+  let conn;
+
+  try {
+    conn = await pool.getConnection();
+    await conn.execute(
+      'INSERT INTO queues (queueCode, department, userID) VALUES (?, ?, ?)',
+      [queueNumber, departmentName, uid]
+    );
+    res.json({ success: true });
+  }
+  catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+  finally {
+    if (conn) conn.release();
+  }
 });
 
 app.post('/api/signup', async (req, res) => {
@@ -48,25 +88,34 @@ app.post('/api/signup', async (req, res) => {
 
 app.post('/api/login', async (req, res) => {
 
-  const { email, password } = req.body;
+  let { email, password } = req.body;
 
   let conn;
 
   try {
     conn = await pool.getConnection();
     const [user] = await conn.execute(
-      'SELECT id, password_hash FROM users WHERE email = ?',
+      'SELECT userID, password_hash FROM users WHERE email = ?',
       [email]
     )
+    console.log(user);
 
     if (user.length === 0) {
       console.log('there is none');
+      return;
     }
 
-    if (await bcrypt.compare(password, user[0].password_hash)) {
 
+    if (await bcrypt.compare(password, user.password_hash)) {
+
+      console.log('The data is intercepted');
+      req.session.uid = user.userID;
       res.json({ "success": true });
+    } else {
+      res.json(({ "failed": false }));
+      console.log('there is something wrong');
     }
+
 
   } catch (err) {
     res.status(500).json({ error: err.message });
