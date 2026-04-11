@@ -219,6 +219,7 @@ if (index) {
 }
 
 if (patient) {
+  let departmentId;
   function showToast(msg) {
     const toast = document.getElementById("toast");
     toast.textContent = msg;
@@ -237,7 +238,7 @@ if (patient) {
     const concern = addQueueForm.concern.value;
 
     try {
-      const res = await fetch('api/queue/create', {
+      const res = await fetch('/api/queue/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ patientName, serviceType, concern })
@@ -250,15 +251,58 @@ if (patient) {
         showToast(data.error || 'Failed');
         return;
       }
-
       showToast(`Queued: ${data.code}`);
+      const nowTicket = document.getElementById('now-ticket');
+      const nowName = document.getElementById('now-name');
+      const completeFormPrompt = document.getElementById('completeFormLabel');
+      completeFormPrompt.classList.add('hidden');
+      addQueueForm.classList.add('hidden');
+      nowTicket.textContent = data.code;
+      nowName.textContent = 'Joined';
+      console.log(data.department_id);
+      departmentId = data.department_id;
+
+
     } catch (err) {
       showToast('Server error');
     }
 
     showToast('Successfully submitted');
 
-
-
   });
+
+  function renderQueueList(data) {
+    const list = document.getElementById('queue-list');
+    list.innerHTML = '';
+
+    if (data.length == 0) {
+      list.innerHTML = '<li class="empty-state">No patients waiting</li>';
+      return;
+    }
+
+    console.log(data);
+
+    data.forEach(q => {
+      const li = document.createElement('li');
+      li.textContent = `${q.code}`;
+      li.classList.add('queue-item');
+      list.appendChild(li);
+    });
+  }
+
+  async function loadQueue(departmentId) {
+    const res = await fetch(`/api/queue/${departmentId}`);
+    const data = await res.json();
+
+    if (!res.ok) return;
+
+    renderQueueList(data);
+  }
+
+  loadQueue(departmentId);
+
+  setInterval(() => {
+    loadQueue(departmentId);
+  }, 3000);
+
 }

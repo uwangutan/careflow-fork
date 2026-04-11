@@ -50,7 +50,7 @@ if (formSignup) {
     const username = formSignup.username.value;
     const finalPassword = password.value.trim();
 
-    const res = await fetch('api/signup', {
+    const res = await fetch('/api/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fullName, contact, username, finalPassword })
@@ -77,7 +77,7 @@ if (formLogin) {
     const username = formLogin.username.value;
     const password = formLogin.password.value;
 
-    const res = await fetch('api/login', {
+    const res = await fetch('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })

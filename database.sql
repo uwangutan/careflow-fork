@@ -113,7 +113,6 @@ CREATE TABLE system_settings (
 
 
 CREATE INDEX idx_queue_status ON queues(status);
-CREATE INDEX idx_queue_counter ON queues(counter_id);
 CREATE INDEX idx_queue_user ON queues(user_id);
 CREATE INDEX idx_queue_created ON queues(created_at);
 

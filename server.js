@@ -221,9 +221,11 @@ app.post('/api/queue/create', reqLogin, async (req, res) => {
 
     await conn.commit();
 
+    console.log('deptid' + categ.department_id);
     res.json({
       success: true,
       queue_id: Number(insert.insertId),
+      department_id: categ.department_id,
       code
     });
 
@@ -234,6 +236,69 @@ app.post('/api/queue/create', reqLogin, async (req, res) => {
     res.status(500).json({ error: err.message });
   } finally {
     conn.release();
+  }
+});
+
+app.get('/api/queue/:department_id', async (req, res) => {
+  const { department_id } = req.params;
+
+  let conn;
+
+  try {
+    conn = await pool.getConnection();
+
+    const rows = await conn.execute(
+      `SELECT queue_id, code, full_name, category, created_at
+            FROM queues
+            WHERE department_id = ?
+            AND status = 'waiting'
+            ORDER BY is_emergency DESC, 
+                      is_priority DESC,
+                      created_at ASC`,
+      [department_id]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+
+app.get('/api/queue/me', reqLogin, async (req, res) => {
+  const uid = req.session.uid;
+
+  let conn;
+
+  try {
+    conn = await pool.getConnection();
+
+    const [rows] = await conn.execute(
+      `SELECT code, department_id 
+            FROM queues
+            WHERE user_id = ?
+            AND status = 'waiting'
+            ORDER BY created_at DESC
+            LIMIT 1`,
+      [uid]
+    );
+
+    if (rows.length === 0) {
+      return res.json({ queued: false });
+    }
+
+    res.json({
+      queued: true,
+      code: rows.code,
+      department_id: rows.department_id
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (conn) conn.release();
   }
 });
 
