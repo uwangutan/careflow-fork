@@ -3,6 +3,7 @@ const mariadb = require('mariadb');
 const dotenv = require('dotenv');
 const bcrypt = require('bcrypt');
 const session = require('express-session');
+const path = require('path');
 
 dotenv.config();
 const app = express();
@@ -17,27 +18,44 @@ const pool = mariadb.createPool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
 });
-//
-// function reqLogin(req, res, next){
-//   if(!req.session.uid){
-//     return res.redirect('/login');
-//   }
-//   next():
-// }
+
+console.log("this is the right file. ");
+function reqLogin(req, res, next) {
+  if (!req.session || !req.session.uid) {
+    return res.redirect('/login.html');
+    // return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
 
 app.use(session({
-  secret: 'gumandoy',
+  name: 'careflow.sid',
+  secret: process.env.SESSION_SECRET,
   resave: false,
-  saveUninitialized: true,
-  cookie: { secure: false }
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: false,
+    sameSite: 'lax'
+  }
+
 }));
 
+app.get('/', reqLogin, (req, res) => {
+  res.sendFile(path.join(__dirname, 'protected/index.html'));
+});
 app.get('/login.html', (req, res) => {
   res.sendFile(__dirname + '/public/login.html');
 });
 
 app.get('/signup.html', (req, res) => {
   res.sendFile(__dirname + '/public/signup.html');
+});
+
+
+
+app.get('/queue', reqLogin, (req, res) => {
+  res.sendFile(path.join(__dirname, 'protected/user.html'));
 });
 
 app.post('/api/queue', async (req, res) => {
@@ -58,7 +76,7 @@ app.post('/api/queue', async (req, res) => {
   try {
     conn = await pool.getConnection();
     const dbres = await conn.execute(
-      'INSERT INTO queues (department, userID) VALUES (?, ?)',
+      'INSERT INTO queues (department, user_id) VALUES (?, ?)',
       [departmentName, uid]
     );
     res.json({
@@ -72,6 +90,18 @@ app.post('/api/queue', async (req, res) => {
   finally {
     if (conn) conn.release();
   }
+});
+
+app.post('/logout', (req, res) => {
+  console.log('logout hit');
+  req.session.destroy(err => {
+    if (err) {
+      return res.status(500).send('Logout failed');
+    }
+
+    res.clearCookie('careflow.sid');
+    return res.sendStatus(200);
+  })
 });
 
 app.post('/api/signup', async (req, res) => {

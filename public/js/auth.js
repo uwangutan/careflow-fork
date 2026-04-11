@@ -58,7 +58,7 @@ if (formSignup) {
 
     const data = await res.json();
     if (data.success) {
-      window.location.href = '/login.html';
+      window.location.href = '/';
     }
     else {
       alert(data.error);
@@ -84,7 +84,7 @@ if (formLogin) {
     });
     const data = await res.json();
     if (data.success) {
-      window.location.href = 'index.html';
+      window.location.href = '/';
     } else {
       alert(data.error);
     }
