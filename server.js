@@ -20,8 +20,11 @@ app.use(session({
   }
 
 }));
+app.use((req, res, next) => {
+  console.log(req.method, req.url); // log every incoming request
+  next();
+});
 app.use(express.json());
-app.use(express.static('public'));
 
 
 const pool = mariadb.createPool({
@@ -41,22 +44,6 @@ function reqLogin(req, res, next) {
 }
 
 
-app.get('/', reqLogin, (req, res) => {
-  res.sendFile(path.join(__dirname, 'protected/index.html'));
-});
-app.get('/login.html', (req, res) => {
-  res.sendFile(__dirname + '/public/login.html');
-});
-
-app.get('/signup.html', (req, res) => {
-  res.sendFile(__dirname + '/public/signup.html');
-});
-
-
-
-app.get('/queue', reqLogin, (req, res) => {
-  res.sendFile(path.join(__dirname, 'protected/user.html'));
-});
 
 app.post('/api/queue', async (req, res) => {
   console.log(req.body);
@@ -136,7 +123,7 @@ app.post('/api/login', async (req, res) => {
   try {
     conn = await pool.getConnection();
     const [user] = await conn.execute(
-      'SELECT user_id, username, password_hash FROM users WHERE username = ?',
+      'SELECT user_id, username, password_hash, role FROM users WHERE username = ?',
       [username]
     )
     console.log(user);
@@ -164,6 +151,46 @@ app.post('/api/login', async (req, res) => {
     if (conn) conn.release();
   }
 
+});
+
+app.get('/api/queue/status', reqLogin, async (req, res) => {
+  console.log('reached');
+  const uid = req.session.uid;
+
+  let conn;
+
+  try {
+    conn = await pool.getConnection();
+
+    const [rows] = await conn.execute(
+      `SELECT q.code,
+            (
+              SELECT COUNT(*) FROM queues 
+              WHERE created_at < q.created_at
+              AND status = 'waiting' 
+              AND department_id = q.department_id
+            ) AS ahead, department_id 
+            FROM queues q
+            WHERE q.user_id = ?
+            AND q.status IN ('waiting', 'serving')
+            ORDER BY created_at DESC
+            LIMIT 1`,
+      [uid]
+    );
+
+    console.log('the rows of status: ', rows.ahead, rows.code, rows.department_id);
+
+    if (rows) {
+      return res.json({ queued: true, ahead: Number(rows.ahead), code: rows.code, department_id: rows.department_id });
+    } else {
+      return res.json({ queued: false });
+    }
+
+  } catch (err) {
+    return res.json({ error: err.message });
+  } finally {
+    if (conn) conn.release();
+  }
 });
 
 app.post('/api/queue/create', reqLogin, async (req, res) => {
@@ -195,6 +222,7 @@ app.post('/api/queue/create', reqLogin, async (req, res) => {
     );
 
 
+
     const [counter] = await conn.execute(
       `SELECT last_number FROM daily_counters
             WHERE date = CURDATE() and department_id = ?`,
@@ -218,6 +246,15 @@ app.post('/api/queue/create', reqLogin, async (req, res) => {
       [patientName, serviceType, concern, code, uid, categ.department_id]
     );
 
+    const [ahead] = await conn.execute(
+      `SELECT COUNT(*) AS ahead 
+            FROM queues
+            WHERE created_at < (
+            SELECT created_at FROM queues WHERE code = ?
+            )
+            AND status = 'waiting'`,
+      [code]
+    )
 
     await conn.commit();
 
@@ -226,6 +263,7 @@ app.post('/api/queue/create', reqLogin, async (req, res) => {
       success: true,
       queue_id: Number(insert.insertId),
       department_id: categ.department_id,
+      ahead: Number(ahead.ahead),
       code
     });
 
@@ -302,5 +340,22 @@ app.get('/api/queue/me', reqLogin, async (req, res) => {
   }
 });
 
+
+app.use(express.static('public'));
+
+app.get('/', reqLogin, (req, res) => {
+  res.sendFile(path.join(__dirname, 'protected/index.html'));
+});
+app.get('/login.html', (req, res) => {
+  res.sendFile(__dirname + '/public/login.html');
+});
+
+app.get('/signup.html', (req, res) => {
+  res.sendFile(__dirname + '/public/signup.html');
+});
+
+app.get('/queue', reqLogin, (req, res) => {
+  res.sendFile(path.join(__dirname, 'protected/user.html'));
+});
 
 app.listen(3000, () => console.log('Running at http://localhost:3000'));

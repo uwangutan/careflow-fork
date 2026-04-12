@@ -304,8 +304,6 @@ textarea#concern:focus {
   gap: 1rem;
   padding: 14px 1.5rem;
   border-bottom: 1px solid var(--surface2);
-  transition: background 0.15s;
-  animation: slideIn 0.25s ease;
 }
 
 @keyframes slideIn {

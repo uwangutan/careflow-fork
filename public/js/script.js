@@ -220,6 +220,12 @@ if (index) {
 
 if (patient) {
   let departmentId;
+  const addQueueForm = document.getElementById('add-queue-form');
+  const completeFormPrompt = document.getElementById('completeFormLabel');
+  const nowTicket = document.getElementById('now-ticket');
+  const nowName = document.getElementById('now-name');
+  const aheadStatus = document.getElementById('stat-in-queue');
+
   function showToast(msg) {
     const toast = document.getElementById("toast");
     toast.textContent = msg;
@@ -228,48 +234,66 @@ if (patient) {
     toast._t = setTimeout(() => toast.classList.remove("show"), 2400);
   }
 
-  const addQueueForm = document.getElementById('add-queue-form');
+  window.addEventListener('DOMContentLoaded', async () => {
+    console.log('i am calling status');
+    const res = await fetch('/api/queue/status');
+    const data = await res.json();
 
-  addQueueForm.addEventListener('submit', async (e) => {
-
-    e.preventDefault();
-    const patientName = addQueueForm.name.value;
-    const serviceType = addQueueForm.serviceType.value;
-    const concern = addQueueForm.concern.value;
-
-    try {
-      const res = await fetch('/api/queue/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patientName, serviceType, concern })
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error);
-        showToast(data.error || 'Failed');
-        return;
-      }
-      showToast(`Queued: ${data.code}`);
-      const nowTicket = document.getElementById('now-ticket');
-      const nowName = document.getElementById('now-name');
-      const completeFormPrompt = document.getElementById('completeFormLabel');
-      completeFormPrompt.classList.add('hidden');
-      addQueueForm.classList.add('hidden');
-      nowTicket.textContent = data.code;
-      nowName.textContent = 'Joined';
-      console.log(data.department_id);
+    if (data.queued) {
       departmentId = data.department_id;
-
-
-    } catch (err) {
-      showToast('Server error');
+      show(data.code, data.ahead);
+      startPolling();
+    } else {
+      form();
     }
-
-    showToast('Successfully submitted');
-
   });
+
+  function form() {
+
+    addQueueForm.addEventListener('submit', async (e) => {
+
+      e.preventDefault();
+      const patientName = addQueueForm.name.value;
+      const serviceType = addQueueForm.serviceType.value;
+      const concern = addQueueForm.concern.value;
+
+      try {
+        const res = await fetch('/api/queue/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patientName, serviceType, concern })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          alert(data.error);
+          showToast(data.error || 'Failed');
+          return;
+        }
+        showToast(`Queued: ${data.code}`);
+        show(data.code, data.ahead);
+        console.log(data.department_id);
+        departmentId = data.department_id;
+        startPolling();
+
+
+      } catch (err) {
+        showToast('Server error');
+      }
+
+      showToast('Successfully submitted');
+
+    });
+  }
+
+  function show(data, ahead) {
+    completeFormPrompt.classList.add('hidden');
+    addQueueForm.classList.add('hidden');
+    nowTicket.textContent = data;
+    nowName.textContent = 'Joined';
+    aheadStatus.textContent = ahead;
+  }
 
   function renderQueueList(data) {
     const list = document.getElementById('queue-list');
@@ -291,6 +315,7 @@ if (patient) {
   }
 
   async function loadQueue(departmentId) {
+    if (!departmentId) return;
     const res = await fetch(`/api/queue/${departmentId}`);
     const data = await res.json();
 
@@ -299,10 +324,23 @@ if (patient) {
     renderQueueList(data);
   }
 
-  loadQueue(departmentId);
+  let poller = null;
+  function startPolling() {
 
-  setInterval(() => {
+    if (!departmentId) return;
+
     loadQueue(departmentId);
-  }, 3000);
+
+    if (poller) clearInterval(poller);
+
+    poller = setInterval(() => {
+      loadQueue(departmentId);
+    }, 3000);
+
+  }
+
+
+
+
 
 }
