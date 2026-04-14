@@ -29,6 +29,7 @@ app.use(express.json());
 
 const pool = mariadb.createPool({
   host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
@@ -39,6 +40,14 @@ function reqLogin(req, res, next) {
   if (!req.session || !req.session.uid) {
     return res.redirect('/login.html');
     // return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+function reqAdmin(req, res, next) {
+
+  if (req.session.uid !== 'admin') {
+    return res.redirect('/queue');
   }
   next();
 }
@@ -138,6 +147,7 @@ app.post('/api/login', async (req, res) => {
 
       console.log('The data is intercepted');
       req.session.uid = user.user_id;
+      req.session.uid = user.role;
       res.json({ "success": true });
     } else {
       res.json(({ "failed": false }));
@@ -266,7 +276,6 @@ app.post('/api/queue/create', reqLogin, async (req, res) => {
       ahead: Number(ahead.ahead),
       code
     });
-
   } catch (err) {
     await conn.rollback();
     console.error(err);
@@ -274,6 +283,72 @@ app.post('/api/queue/create', reqLogin, async (req, res) => {
     res.status(500).json({ error: err.message });
   } finally {
     conn.release();
+  }
+});
+
+app.get('/api/admin/status', reqLogin, async (req, res) => {
+  console.log('admin counter reached');
+  const uid = req.session.uid;
+
+  let conn;
+
+  try {
+    conn = await pool.getConnection();
+
+    const [rows] = await conn.execute(
+      `SELECT q.code,
+            (
+              SELECT COUNT(*) FROM queues 
+              WHERE created_at < q.created_at
+              AND status = 'waiting' 
+              AND department_id = q.department_id
+            ) AS ahead, department_id 
+            FROM queues q
+            WHERE q.user_id = ?
+            AND q.status IN ('waiting', 'serving')
+            ORDER BY created_at DESC
+            LIMIT 1`,
+      [uid]
+    );
+
+    if (rows) {
+      return res.json({ queued: true, ahead: Number(rows.ahead), code: rows.code, department_id: rows.department_id });
+    } else {
+      return res.json({ queued: false });
+    }
+
+  } catch (err) {
+    return res.json({ error: err.message });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.get('/api/admin/:department_id', async (req, res) => {
+  const { department_id } = req.params;
+
+  let conn;
+
+  try {
+    conn = await pool.getConnection();
+
+    const rows = await conn.execute( //unfinished
+      `SELECT code, department_id, full_name, 
+            FROM queues
+            WHERE department_id = ?
+            AND status = 'waiting'
+            ORDER BY is_emergency DESC, 
+                      is_priority DESC,
+                      created_at ASC`,
+      [department_id]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+
+  } finally {
+    if (conn) conn.release();
   }
 });
 
@@ -286,7 +361,7 @@ app.get('/api/queue/:department_id', async (req, res) => {
     conn = await pool.getConnection();
 
     const rows = await conn.execute(
-      `SELECT queue_id, code, full_name, category, created_at
+      `SELECT code
             FROM queues
             WHERE department_id = ?
             AND status = 'waiting'
@@ -306,40 +381,6 @@ app.get('/api/queue/:department_id', async (req, res) => {
 });
 
 
-app.get('/api/queue/me', reqLogin, async (req, res) => {
-  const uid = req.session.uid;
-
-  let conn;
-
-  try {
-    conn = await pool.getConnection();
-
-    const [rows] = await conn.execute(
-      `SELECT code, department_id 
-            FROM queues
-            WHERE user_id = ?
-            AND status = 'waiting'
-            ORDER BY created_at DESC
-            LIMIT 1`,
-      [uid]
-    );
-
-    if (rows.length === 0) {
-      return res.json({ queued: false });
-    }
-
-    res.json({
-      queued: true,
-      code: rows.code,
-      department_id: rows.department_id
-    })
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  } finally {
-    if (conn) conn.release();
-  }
-});
-
 
 app.use(express.static('public'));
 
@@ -348,6 +389,10 @@ app.get('/', reqLogin, (req, res) => {
 });
 app.get('/login.html', (req, res) => {
   res.sendFile(__dirname + '/public/login.html');
+});
+
+app.get('/admin', reqLogin, reqAdmin, (req, res) => {
+  res.sendFile(__dirname + '/protected/queueing.html');
 });
 
 app.get('/signup.html', (req, res) => {
