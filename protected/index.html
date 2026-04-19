@@ -234,11 +234,12 @@
             </div>
         </div>
         </div>
+
     
         <!-- TAB 2 - QUEUE LINE -->
         <div class="tab-content" id="tab-line">
         <div class="queue-line-header">
-            <div style="font-size:15px;font-weight:600;color:var(--text)">All Patients <span style="color:var(--text3);font-weight:400;font-size:13px" id="line-count"></span></div>
+            <div class="queue-line-title">All Patients<span style="color:var(--text3);font-weight:400;font-size:13px" id="line-count"></span></div>
             <button class="btn-add-patient" onclick="openModal()">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Add Patient
@@ -286,7 +287,7 @@
         <button class="ai-close" onclick="toggleAI()">×</button>
     </div>
     <div class="ai-alert">
-        <div class="ai-alert-icon">⚠</div>
+        <div class="ai-alert-icon red-ai-icon">⚠</div>
         <div>
         <div class="ai-alert-text">
             <strong>Q-052 · Gian </strong> Vitals indicate possible cardiac distress. Recommend moving to top of queue.
