@@ -18,94 +18,111 @@ const isDashboard = !!document.getElementById('dept-grid');
 
 if (isDashboard) {
 
-  // ─── DATA ───
-  // In production these would be fetched from your API.
-  // The shape is kept identical to the original so your
-  // backend calls can replace these arrays directly.
-  const departments = [
-    { id:'genmed',    name:'Gen Med / Internal Medicine', type:'patient-care', queue:18, color:'#e8f7f2', emoji:'🏥' },
-    { id:'birthing',  name:'Birthing / OB-GYN',           type:'patient-care', queue:7,  color:'#fef3f2', emoji:'🤱' },
-    { id:'geriatrics',name:'Geriatrics',                  type:'patient-care', queue:12, color:'#eff6ff', emoji:'🧓' },
-    { id:'radiology', name:'Radiology',                   type:'laboratory',   queue:5,  color:'#fefce8', emoji:'🔬' },
-    { id:'pathology', name:'Clinical Pathology',          type:'laboratory',   queue:0,  color:'#f0fdf4', emoji:'🧪' },
-    { id:'pharmacy',  name:'Pharmacy',                    type:'support',      queue:3,  color:'#faf5ff', emoji:'💊' },
-    { id:'cardiology',name:'Cardiology',                  type:'patient-care', queue:14, color:'#fff1f2', emoji:'❤️' },
-    { id:'neurology', name:'Neurology',                   type:'patient-care', queue:6,  color:'#f0f4ff', emoji:'🧠' },
-  ];
+  // ─── STATE ───
+  let departments  = [];
+  let counters     = [];
+  let patients     = [];
+  let activeDept   = null;
+  let activeFilter = 'all';
+  let searchVal    = '';
+  let queueOpen    = true;
+  let cutoffTime   = '17:00';
+  let qNum         = 42;
 
-  const counters = [
-    { room:'Room 1', num:'042', doctor:'Dr. Ana Santos',  spec:'General Medicine',  avg:'8 min', available:true  },
-    { room:'Room 2', num:'039', doctor:'Dr. Marco Ramos', spec:'Internal Medicine', avg:'11 min', available:true },
-    { room:'Room 3', num:'041', doctor:'Dr. Liza Torres', spec:'General Practice',  avg:'7 min', available:true  },
-  ];
-
-  let patients = [
-    { q:'042', name:'Imong Nawng',   gender:'F', age:72, priority:'high',   status:'serving', counter:'Room 1 — Dr. Santos', wait:'Serving now' },
-    { q:'043', name:'Imong Mama',    gender:'M', age:58, priority:'medium', status:'waiting', counter:'Room 1 — Dr. Santos', wait:'~8 min'      },
-    { q:'044', name:'Imong Tae',     gender:'F', age:41, priority:'low',    status:'waiting', counter:'Room 2 — Dr. Ramos', wait:'~14 min'     },
-    { q:'039', name:'Imong Betlog',  gender:'M', age:67, priority:'medium', status:'waiting', counter:'Room 3 — Dr. Torres',wait:'~19 min'     },
-    { q:'045', name:'Rain',          gender:'F', age:34, priority:'low',    status:'waiting', counter:'Room 2 — Dr. Ramos', wait:'~22 min'     },
-    { q:'046', name:'SK Girl',       gender:'M', age:80, priority:'high',   status:'waiting', counter:'Room 1 — Dr. Santos', wait:'~27 min'    },
-    { q:'047', name:'Shaken',        gender:'F', age:65, priority:'high',   status:'waiting', counter:'Room 3 — Dr. Torres',wait:'~31 min'     },
-    { q:'048', name:'AJ Nicole',     gender:'M', age:52, priority:'low',    status:'waiting', counter:'Room 2 — Dr. Ramos', wait:'~36 min'     },
-  ];
-
-  let activeDept    = 'genmed';
-  let activeFilter  = 'all';
-  let searchVal     = '';
-  let queueOpen = true;
-  let cutoffTime = '17:00';
-  // ===== NEW FEATURE START: Dashboard statistics state =====
-  // Holds per-department metrics fetched from SQL-backed API.
   let dashboardStats = {
-    inQueue: 0,
-    waiting: 0,
-    servedToday: 0,
-    avgWaitMin: null
+    inQueue: 0, waiting: 0, servedToday: 0, avgWaitMin: null
   };
-  // ===== NEW FEATURE END: Dashboard statistics state =====
+
+  // ─── HELPERS ───
+  function formatTime(twentyFour) {
+    if (!twentyFour || !twentyFour.includes(':')) return 'Not set';
+    const [h, m] = twentyFour.split(':');
+    const hour   = parseInt(h, 10);
+    const hour12 = hour % 12 || 12;
+    return String(hour12).padStart(2, '0') + ':' + m + ' ' + (hour >= 12 ? 'PM' : 'AM');
+  }
+
+  function getDemographicText(p) {
+    return `${p.gender || 'Gender'} · ${p.age || 'Age'}`;
+  }
 
   function getActiveDepartmentName() {
     const dept = departments.find(d => d.id === activeDept);
     return dept ? dept.name : '';
   }
 
-  // ===== NEW FEATURE START: Fetch DB-backed dashboard statistics =====
-  async function fetchDepartmentStats() {
-    const departmentName = getActiveDepartmentName();
-    if (!departmentName) return;
-    const res = await fetch('/api/admin/dashboard/stats?department_name=' + encodeURIComponent(departmentName));
-    if (!res.ok) throw new Error('Failed to load department statistics');
+  // ─── FETCH ───
+  async function fetchBootstrapData() {
+    const res  = await fetch('/api/admin/dashboard/bootstrap');
+    if (!res.ok) throw new Error('Failed to load dashboard bootstrap data');
     const data = await res.json();
+
+    const deptColors = ['#e8f7f2','#fef3f2','#eff6ff','#fefce8','#f0fdf4','#faf5ff','#fff1f2','#f0f4ff'];
+    const deptEmojis = ['🏥','🤱','🧓','🔬','🧪','💊','❤️','🧠'];
+
+    function inferDeptType(name) {
+      const n = String(name || '').toLowerCase();
+      if (n.includes('lab') || n.includes('pathology') || n.includes('radio')) return 'laboratory';
+      if (n.includes('pharmacy') || n.includes('support')) return 'support';
+      return 'patient-care';
+    }
+
+    departments = (data.departments || []).map((d, i) => ({
+      id:    String(d.department_id),
+      name:  d.name,
+      type:  inferDeptType(d.name),
+      queue: Number(d.queue_count || 0),
+      color: deptColors[i % deptColors.length],
+      emoji: deptEmojis[i % deptEmojis.length]
+    }));
+
+    counters = (data.counters || []).map(c => ({
+      counterId:    Number(c.counter_id),
+      departmentId: String(c.department_id),
+      room:         c.name || `Counter ${c.counter_id}`,
+      num:          c.current_queue_id ? String(c.current_queue_id).padStart(3, '0') : '---',
+      doctor:       c.name || `Counter ${c.counter_id}`,
+      spec:         'General Consultation',
+      avg:          'N/A',
+      available:    c.status === 'open'
+    }));
+
+    queueOpen = data.queue_status !== 'closed';
+  }
+
+  async function fetchDepartmentQueues(departmentId) {
+    const res  = await fetch('/api/admin/dashboard/department/' + departmentId);
+    if (!res.ok) throw new Error('Failed to load department queue data');
+    const data = await res.json();
+    patients = (data.queues || []).map(q => ({
+      queueId:   Number(q.queue_id),
+      q:         q.code || String(q.queue_id).padStart(3, '0'),
+      name:      q.full_name || 'Unknown',
+      gender:    q.sex || '',
+      age:       q.age || '',
+      priority:  q.is_emergency || q.is_priority ? 'high' : 'medium',
+      status:    q.status,
+      counter:   'Unassigned',
+      wait:      q.status === 'serving' ? 'Serving now' : 'Waiting',
+      queueType: q.category === 'priority' ? 'pwd' : 'regular',
+      reason:    q.category || 'Reason for Visit'
+    }));
+  }
+
+  async function fetchDepartmentStats(departmentId) {
+    const res  = await fetch('/api/admin/dashboard/stats/' + departmentId);
+    if (!res.ok) throw new Error('Failed to load department statistics');
+    const data  = await res.json();
     const stats = data.stats || {};
     dashboardStats = {
-      inQueue: Number(stats.in_queue || 0),
-      waiting: Number(stats.waiting || 0),
-      servedToday: Number(stats.served_today || 0),
+      inQueue:    Number(stats.in_queue    || 0),
+      waiting:    Number(stats.waiting     || 0),
+      servedToday:Number(stats.served_today|| 0),
       avgWaitMin: stats.avg_wait_min === null ? null : Number(stats.avg_wait_min)
     };
   }
-  // ===== NEW FEATURE END: Fetch DB-backed dashboard statistics =====
 
-  // ===== NEW FEATURE START: Render stat cards from DB data =====
-  function renderStats() {
-    const queueEl = document.getElementById('stat-queue');
-    const servedEl = document.getElementById('stat-served');
-    const waitingEl = document.getElementById('stat-waiting');
-    const waitEl = document.getElementById('stat-wait');
-    const servedSubEl = document.getElementById('stat-served-sub');
-    const waitSubEl = document.getElementById('stat-wait-sub');
-
-    if (queueEl) queueEl.textContent = String(dashboardStats.inQueue);
-    if (servedEl) servedEl.textContent = String(dashboardStats.servedToday);
-    if (waitingEl) waitingEl.textContent = String(dashboardStats.waiting);
-    if (waitEl) waitEl.textContent = dashboardStats.avgWaitMin === null ? 'N/A' : `~${Math.round(dashboardStats.avgWaitMin)} min`;
-    if (servedSubEl) servedSubEl.textContent = 'From completed queues today';
-    if (waitSubEl) waitSubEl.textContent = 'Average from called queues today';
-  }
-  // ===== NEW FEATURE END: Render stat cards from DB data =====
-
-  // ─── DEPARTMENT GRID ───
+  // ─── RENDER: DEPARTMENTS ───
   function renderDepts() {
     const grid     = document.getElementById('dept-grid');
     const filtered = departments.filter(d => {
@@ -113,7 +130,6 @@ if (isDashboard) {
       const matchSearch = d.name.toLowerCase().includes(searchVal.toLowerCase());
       return matchType && matchSearch;
     });
-
     grid.innerHTML = filtered.map(d => `
       <div class="dept-card" onclick="openDept('${d.id}','${d.name.replace(/'/g,"\\'")}')">
         <div class="dept-img" style="background:${d.color}">
@@ -139,46 +155,15 @@ if (isDashboard) {
     renderDepts();
   }
 
-  // ─── PAGE NAVIGATION ───
-  function showPage(p) {
-    document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
-    document.getElementById('page-' + p).classList.add('active');
-    document.querySelectorAll('.side-btn').forEach((b, i) => {
-      b.classList.remove('active');
-      if ((p === 'dept'  && i === 0) ||
-          (p === 'queue' && i === 1)) b.classList.add('active');
-    });
-  }
-
-  async function openDept(id, name) {
-    activeDept = id;
-    document.getElementById('active-dept-name').textContent = name;
-    showPage('queue');
-    try {
-      await fetchDepartmentStats();
-    } catch (err) {
-      console.error(err);
-      showToast('Failed to load dashboard stats');
-    }
-    renderCounters();
-    renderNextList();
-    renderTable();
-    renderStats();
-    switchTab('main', document.querySelector('.tab-btn'));
-  }
-
-  // ─── TABS ───
-  function switchTab(tab, btn) {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    if (btn) btn.classList.add('active');
-    document.getElementById('tab-' + tab).classList.add('active');
-  }
-
-  // ─── COUNTER CARDS ───
+  // ─── RENDER: COUNTERS ───
   function renderCounters() {
-    const row = document.getElementById('counters-row');
-    row.innerHTML = counters.map((c, i) => `
+    const row          = document.getElementById('counters-row');
+    const deptCounters = counters.filter(c => c.departmentId === String(activeDept));
+    if (!deptCounters.length) {
+      row.innerHTML = `<div class="counter-card">No counters configured for this department.</div>`;
+      return;
+    }
+    row.innerHTML = deptCounters.map((c, i) => `
       <div class="counter-card ${i === 0 ? 'active-counter' : ''}" onclick="selectCounter(${i}, this)">
         <div class="counter-room">${c.room}</div>
         <div class="counter-num">${c.num}</div>
@@ -188,13 +173,11 @@ if (isDashboard) {
         <div class="counter-toggle-row" onclick="event.stopPropagation()">
           <span class="counter-status ${c.available ? 'on' : 'off'}">${c.available ? 'Available' : 'On Break'}</span>
           <label class="toggle mini ${!queueOpen ? 'disabled' : ''}">
-            <input
-              type="checkbox"
+            <input type="checkbox"
               ${c.available ? 'checked' : ''}
-              ${!queueOpen ? 'disabled' : ''}
-              onchange="toggleDoctorAvailability(${i}, this.checked)"
-              onclick="event.stopPropagation()"
-            >
+              ${!queueOpen  ? 'disabled' : ''}
+              onchange="toggleDoctorAvailability(${c.counterId}, this.checked)"
+              onclick="event.stopPropagation()">
             <span class="toggle-knob"></span>
           </label>
         </div>
@@ -207,7 +190,24 @@ if (isDashboard) {
     el.classList.add('active-counter');
   }
 
-  // ─── NEXT-UP LIST ───
+  // ─── RENDER: NOW SERVING ───
+  function renderNowServingCard() {
+    const serving = patients.find(p => p.status === 'serving') || patients.find(p => p.status === 'waiting');
+    if (!serving) {
+      document.getElementById('q-number').textContent = '---';
+      document.getElementById('q-name').textContent   = 'No patient in queue';
+      document.getElementById('q-sub').textContent    = 'Gender · Age';
+      return;
+    }
+    document.getElementById('q-number').textContent = serving.q;
+    document.getElementById('q-name').textContent   = serving.name;
+    document.getElementById('q-sub').textContent    = getDemographicText(serving);
+    const pc = document.getElementById('q-priority');
+    pc.className   = 'priority-chip ' + serving.priority;
+    pc.textContent = serving.priority.charAt(0).toUpperCase() + serving.priority.slice(1);
+  }
+
+  // ─── RENDER: NEXT LIST ───
   function renderNextList() {
     const waiting = patients.filter(p => p.status === 'waiting').slice(0, 4);
     document.getElementById('next-list').innerHTML = waiting.map(p => `
@@ -215,30 +215,25 @@ if (isDashboard) {
         <div class="next-num">${p.q}</div>
         <div>
           <div class="next-pname">${p.name}</div>
-          <div class="next-psub">${p.gender} · ${p.age} yrs · ${p.wait}</div>
+          <div class="next-psub">${getDemographicText(p)} · ${p.wait}</div>
         </div>
         <span class="priority-chip ${p.priority}" style="margin-left:auto;font-size:11px">${p.priority}</span>
       </div>
     `).join('');
   }
 
-  // ─── QUEUE TABLE ───
-  function renderTable() {
-    const priorityOrder = { high: 0, medium: 1, low: 2 };
-    const sorted = [...patients].sort((a, b) => {
-      if (a.status === 'serving') return -1;
-      if (b.status === 'serving') return 1;
-      return priorityOrder[a.priority] - priorityOrder[b.priority];
-    });
-
-    document.getElementById('line-count').textContent = `(${patients.length} patients)`;
-    document.getElementById('queue-tbody').innerHTML = sorted.map(p => `
+  // ─── RENDER: QUEUE TABLE ───
+  function renderQueueRows(list) {
+    if (!list.length) {
+      return `<tr><td colspan="7" style="color:var(--text3);padding:16px">No patients in this queue.</td></tr>`;
+    }
+    return list.map(p => `
       <tr>
         <td><span class="priority-chip ${p.priority}">${p.priority}</span></td>
         <td class="td-queue">${p.q}</td>
         <td style="font-weight:500">${p.name}</td>
         <td><span class="status-badge ${p.status}">${p.status}</span></td>
-        <td style="font-size:13px;color:var(--text2)">${p.counter}</td>
+        <td>${p.counter}</td>
         <td class="ai-wait"><strong>${p.wait}</strong></td>
         <td>
           <div class="action-btns">
@@ -246,7 +241,7 @@ if (isDashboard) {
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
               Call
             </button>
-            <button class="act-btn del" onclick="deletePatient('${p.q}')">
+            <button class="act-btn del" onclick="deletePatient(${p.queueId || 0}, '${p.q}')">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
               Remove
             </button>
@@ -256,65 +251,127 @@ if (isDashboard) {
     `).join('');
   }
 
-  // ─── QUEUE ACTIONS ───
-  let qNum = 42;
+  function renderTable() {
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    const sorted = [...patients].sort((a, b) => {
+      if (a.status === 'serving') return -1;
+      if (b.status === 'serving') return  1;
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    });
+    const pwdPatients     = sorted.filter(p => p.queueType === 'pwd');
+    const regularPatients = sorted.filter(p => p.queueType !== 'pwd');
 
+    document.getElementById('line-count').textContent     = ` (${patients.length} patients)`;
+    document.getElementById('pwd-count').textContent      = `(${pwdPatients.length})`;
+    document.getElementById('regular-count').textContent  = `(${regularPatients.length})`;
+    document.getElementById('pwd-queue-tbody').innerHTML      = renderQueueRows(pwdPatients);
+    document.getElementById('regular-queue-tbody').innerHTML  = renderQueueRows(regularPatients);
+  }
+
+  // ─── RENDER: STATS ───
+  function renderStats() {
+    const queueEl    = document.getElementById('stat-queue');
+    const servedEl   = document.getElementById('stat-served');
+    const waitingEl  = document.getElementById('stat-waiting');
+    const waitEl     = document.getElementById('stat-wait');
+    const servedSubEl= document.getElementById('stat-served-sub');
+    const waitSubEl  = document.getElementById('stat-wait-sub');
+    if (queueEl)    queueEl.textContent   = String(dashboardStats.inQueue);
+    if (servedEl)   servedEl.textContent  = String(dashboardStats.servedToday);
+    if (waitingEl)  waitingEl.textContent = String(dashboardStats.waiting);
+    if (waitEl)     waitEl.textContent    = dashboardStats.avgWaitMin === null ? 'N/A' : `~${Math.round(dashboardStats.avgWaitMin)} min`;
+    if (servedSubEl)servedSubEl.textContent = 'From completed queues today';
+    if (waitSubEl)  waitSubEl.textContent   = 'Average from called queues today';
+  }
+
+  // ─── RENDER: QUEUE CONTROLS ───
+  function renderQueueControls() {
+    const cutoffDisplay          = document.getElementById('queue-cutoff-display');
+    const cutoffInput            = document.getElementById('queue-cutoff-time');
+    const queueNotice            = document.getElementById('queue-closed-notice');
+    const queueManagementContent = document.getElementById('queue-management-content');
+    if (cutoffDisplay)          cutoffDisplay.textContent = 'Cutoff: ' + formatTime(cutoffTime);
+    if (cutoffInput)            cutoffInput.value         = cutoffTime;
+    if (queueNotice)            queueNotice.classList.toggle('open', !queueOpen);
+    if (queueManagementContent) queueManagementContent.classList.toggle('queue-closed-dim', !queueOpen);
+  }
+
+  // ─── NAVIGATION ───
+  function showPage(p) {
+    document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+    document.getElementById('page-' + p).classList.add('active');
+    document.querySelectorAll('.side-btn').forEach((b, i) => {
+      b.classList.remove('active');
+      if ((p === 'dept'  && i === 0) || (p === 'queue' && i === 1)) b.classList.add('active');
+    });
+  }
+
+  async function openDept(id, name) {
+    activeDept = id;
+    document.getElementById('active-dept-name').textContent = name;
+    showPage('queue');
+    try {
+      await fetchDepartmentQueues(activeDept);
+      await fetchDepartmentStats(activeDept);
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to load department data');
+    }
+    renderCounters();
+    renderNextList();
+    renderTable();
+    renderNowServingCard();
+    renderStats();
+    switchTab('main', document.querySelector('.tab-btn'));
+  }
+
+  function switchTab(tab, btn) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    document.getElementById('tab-' + tab).classList.add('active');
+  }
+
+  // ─── QUEUE ACTIONS ───
   function recallQueue() {
-    showToast('Queue #0' + qNum + ' recalled — announcement sent');
+    showToast('Queue #' + String(qNum).padStart(3,'0') + ' recalled — announcement sent');
   }
 
   function skipQueue() {
     qNum++;
-    document.getElementById('q-number').textContent = '0' + qNum;
+    document.getElementById('q-number').textContent = String(qNum).padStart(3, '0');
     const p = patients.find(p => parseInt(p.q) === qNum);
     if (p) {
       document.getElementById('q-name').textContent = p.name;
-      document.getElementById('q-sub').textContent  = p.gender + ' · ' + p.age + ' years';
+      document.getElementById('q-sub').textContent  = getDemographicText(p);
       const pc = document.getElementById('q-priority');
       pc.className   = 'priority-chip ' + p.priority;
       pc.textContent = p.priority.charAt(0).toUpperCase() + p.priority.slice(1);
     }
-    showToast('Skipped to Queue #0' + qNum);
+    showToast('Skipped to Queue #' + String(qNum).padStart(3,'0'));
   }
 
-  function callPatient(q)   { showToast('Calling Queue #' + q + '…'); }
+  function callPatient(q) { showToast('Calling Queue #' + q + '…'); }
 
-  function deletePatient(q) {
-    patients = patients.filter(p => p.q !== q);
-    renderTable();
-    renderNextList();
-    fetchDepartmentStats().then(renderStats).catch(err => console.error(err));
-    showToast('Patient #' + q + ' removed from queue');
+  async function deletePatient(queueId, qCode) {
+    if (!queueId) return;
+    try {
+      const res = await fetch('/api/admin/delete/' + queueId, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete queue entry');
+      await fetchDepartmentQueues(activeDept);
+      await fetchDepartmentStats(activeDept);
+      renderTable();
+      renderNextList();
+      renderNowServingCard();
+      renderStats();
+      showToast('Patient #' + qCode + ' removed from queue');
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to remove patient from queue');
+    }
   }
 
-  // ===== NEW FEATURE START: Queue controls + doctor availability =====
-  function formatTime(twentyFour) {
-    if (!twentyFour || !twentyFour.includes(':')) return 'Not set';
-    const [h, m] = twentyFour.split(':');
-    const hour = parseInt(h, 10);
-    const suffix = hour >= 12 ? 'PM' : 'AM';
-    const hour12 = hour % 12 || 12;
-    return String(hour12).padStart(2, '0') + ':' + m + ' ' + suffix;
-  }
-
-  function renderQueueControls() {
-    const cutoffDisplay = document.getElementById('queue-cutoff-display');
-    const cutoffInput = document.getElementById('queue-cutoff-time');
-    const queueNotice = document.getElementById('queue-closed-notice');
-    const queueManagementContent = document.getElementById('queue-management-content');
-    if (cutoffDisplay) cutoffDisplay.textContent = 'Cutoff: ' + formatTime(cutoffTime);
-    if (cutoffInput) cutoffInput.value = cutoffTime;
-    if (queueNotice) queueNotice.classList.toggle('open', !queueOpen);
-    if (queueManagementContent) queueManagementContent.classList.toggle('queue-closed-dim', !queueOpen);
-  }
-
-  function toggleDoctorAvailability(counterIndex, available) {
-    if (typeof counters[counterIndex] === 'undefined') return;
-    counters[counterIndex].available = !!available;
-    renderCounters();
-    showToast(counters[counterIndex].doctor + (available ? ' is available' : ' is on break'));
-  }
-
+  // ─── QUEUE OPEN / CLOSE ───
   function setCutoffTime(value) {
     if (!value) return;
     cutoffTime = value;
@@ -322,31 +379,80 @@ if (isDashboard) {
     showToast('Queue cutoff time set to ' + formatTime(cutoffTime));
   }
 
-  function continueQueue() {
+  async function closeQueue() {
     queueOpen = true;
+    try {
+      const res = await fetch('/api/admin/queue-status', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queueOpen: true })
+      });
+      if (!res.ok) throw new Error('Failed to open queue');
+    } catch (err) {
+      queueOpen = false;
+      console.error(err);
+      showToast('Failed to update queue status');
+      renderQueueControls();
+      return;
+    }
     renderCounters();
     renderQueueControls();
-    showToast('Queue continues accepting patients');
+    showToast('Queue is now open for new patients');
   }
 
-  function closeQueue() {
+  async function continueQueue() {
     queueOpen = false;
+    try {
+      const res = await fetch('/api/admin/queue-status', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queueOpen: false })
+      });
+      if (!res.ok) throw new Error('Failed to close queue');
+    } catch (err) {
+      queueOpen = true;
+      console.error(err);
+      showToast('Failed to update queue status');
+      renderQueueControls();
+      return;
+    }
     renderCounters();
     renderQueueControls();
     showToast('Queue closed for new patients');
   }
-  // ===== NEW FEATURE END: Queue controls + doctor availability =====
+
+  async function toggleDoctorAvailability(counterId, available) {
+    const idx = counters.findIndex(c => c.counterId === Number(counterId));
+    if (idx < 0) return;
+    const prev = counters[idx].available;
+    counters[idx].available = !!available;
+    try {
+      const res = await fetch('/api/admin/counters/' + counterId + '/status', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ available: !!available })
+      });
+      if (!res.ok) throw new Error('Failed to update counter status');
+    } catch (err) {
+      counters[idx].available = prev;
+      console.error(err);
+      showToast('Failed to update doctor availability');
+      renderCounters();
+      return;
+    }
+    renderCounters();
+    renderQueueControls();
+    showToast(counters[idx].doctor + (counters[idx].available ? ' is now available' : ' is on break'));
+  }
 
   // ─── AI PANEL ───
-  function toggleAI() {
-    document.getElementById('ai-panel').classList.toggle('open');
-  }
+  function toggleAI() { document.getElementById('ai-panel').classList.toggle('open'); }
 
   function acceptAI() {
     const idx = patients.findIndex(p => p.q === '047');
     if (idx > -1) {
       patients[idx].priority = 'high';
-      const removed = patients.splice(idx, 1)[0];
+      const removed      = patients.splice(idx, 1)[0];
       const firstWaiting = patients.findIndex(p => p.status === 'waiting');
       patients.splice(Math.max(firstWaiting, 0), 0, removed);
       renderTable();
@@ -357,48 +463,68 @@ if (isDashboard) {
     showToast('Q-047 promoted to top of queue');
   }
 
-  // ─── ADD PATIENT MODAL ───
+  // ─── MODAL ───
   function openModal()  { document.getElementById('modal-overlay').classList.add('open'); }
   function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+  function closeModalOuter(e) { if (e.target === document.getElementById('modal-overlay')) closeModal(); }
 
-  function closeModalOuter(e) {
-    if (e.target === document.getElementById('modal-overlay')) closeModal();
-  }
-
-  function addPatient() {
-    if (!queueOpen) { alert('Queue is currently closed. Please continue queue first.'); return; }
-    const first = document.getElementById('f-first').value.trim();
-    const last  = document.getElementById('f-last').value.trim();
-    if (!first || !last) { alert('Please enter patient name.'); return; }
-
-    const gender   = document.getElementById('f-gender').value;
-    const age      = document.getElementById('f-age').value || '—';
-    const priority = document.getElementById('f-priority').value;
-    const counter  = document.getElementById('f-counter').value;
-    const maxQ     = Math.max(...patients.map(p => parseInt(p.q)));
-    const newQ     = String(maxQ + 1).padStart(3, '0');
-
-    patients.push({
-      q: newQ, name: first + ' ' + last,
-      gender, age: parseInt(age) || 0,
-      priority, status: 'waiting', counter,
-      wait: '~' + (patients.length * 5 + 5) + ' min'
-    });
-
-    renderTable();
-    renderNextList();
-    fetchDepartmentStats().then(renderStats).catch(err => console.error(err));
-    closeModal();
-    ['f-first','f-last','f-age','f-notes'].forEach(id => {
-      document.getElementById(id).value = '';
-    });
-    showToast('Patient ' + first + ' ' + last + ' added as Queue #' + newQ);
+  async function addPatient() {
+    if (!queueOpen) { alert('Queue is currently closed. Please open the queue first.'); return; }
+    const name     = document.getElementById('f-name').value.trim();
+    const sex      = document.getElementById('f-sex').value;
+    const ageRaw   = document.getElementById('f-age').value;
+    const contact  = document.getElementById('f-contact').value.trim();
+    const reason   = document.getElementById('f-reason').value.trim();
+    if (!name || !sex || !ageRaw || !contact || !reason) {
+      alert('Please complete all required fields: name, age, sex, contact number, and reason for visit.');
+      return;
+    }
+    const age = parseInt(ageRaw, 10);
+    if (Number.isNaN(age) || age < 0) { alert('Please enter a valid age.'); return; }
+    const queueType  = document.getElementById('f-queue-type').value;
+    const priority   = document.getElementById('f-priority').value;
+    const counter    = document.getElementById('f-counter').value;
+    const complaint  = document.getElementById('f-complaint').value.trim();
+    const conditions = document.getElementById('f-conditions').value.trim();
+    const activeDepartment = departments.find(d => String(d.id) === String(activeDept));
+    if (!activeDepartment) { alert('No active department selected.'); return; }
+    try {
+      const res = await fetch('/api/queue/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+        patientName: name,
+        serviceType: activeDepartment.name,
+        concern: reason
+          + (complaint  ? ' | Symptoms: '   + complaint  : '')
+          + (conditions ? ' | Conditions: ' + conditions : ''),
+        queueType: queueType,
+        priority: priority
+      })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to create queue');
+      await fetchBootstrapData();
+      await fetchDepartmentQueues(activeDept);
+      renderDepts();
+      renderTable();
+      renderNextList();
+      renderNowServingCard();
+      closeModal();
+      ['f-name','f-age','f-contact','f-reason','f-complaint','f-conditions'].forEach(id => {
+        document.getElementById(id).value = '';
+      });
+      document.getElementById('f-sex').value        = '';
+      document.getElementById('f-queue-type').value = 'regular';
+      showToast('Patient ' + name + ' added as Queue #' + (data.code || 'new'));
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to add patient to queue');
+    }
   }
 
   // ─── NOTIFICATIONS ───
-  function toggleNotif() {
-    document.getElementById('notif-panel').classList.toggle('open');
-  }
+  function toggleNotif() { document.getElementById('notif-panel').classList.toggle('open'); }
 
   document.addEventListener('click', e => {
     if (!e.target.closest('#notif-btn') && !e.target.closest('#notif-panel')) {
@@ -413,55 +539,62 @@ if (isDashboard) {
     if (!t) {
       t = document.createElement('div');
       t.id = 'toast';
-      t.style.cssText = [
-        'position:fixed','bottom:100px','left:50%',
-        'transform:translateX(-50%)',
-        'background:#111','color:#fff',
-        'padding:10px 20px','border-radius:8px',
-        'font-size:13px','font-weight:500',
-        'z-index:999','opacity:0','transition:opacity 0.2s',
-        'white-space:nowrap','box-shadow:0 4px 16px rgba(0,0,0,0.3)'
-      ].join(';');
+      t.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:500;z-index:999;opacity:0;transition:opacity 0.2s;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,0.3)';
       document.body.appendChild(t);
     }
-    t.textContent  = msg;
+    t.textContent   = msg;
     t.style.opacity = '1';
     clearTimeout(t._timeout);
     t._timeout = setTimeout(() => t.style.opacity = '0', 2800);
   }
 
-  // ─── EXPOSE GLOBALS (called from inline HTML onclick attributes) ───
-  window.filterDepts    = filterDepts;
-  window.setFilter      = setFilter;
-  window.showPage       = showPage;
-  window.openDept       = openDept;
-  window.switchTab      = switchTab;
-  window.selectCounter  = selectCounter;
-  window.recallQueue    = recallQueue;
-  window.skipQueue      = skipQueue;
-  window.callPatient    = callPatient;
-  window.deletePatient  = deletePatient;
-  window.toggleDoctorAvailability = toggleDoctorAvailability;
-  window.setCutoffTime  = setCutoffTime;
-  window.continueQueue  = continueQueue;
-  window.closeQueue     = closeQueue;
-  window.toggleAI       = toggleAI;
-  window.acceptAI       = acceptAI;
-  window.openModal      = openModal;
-  window.closeModal     = closeModal;
-  window.closeModalOuter= closeModalOuter;
-  window.addPatient     = addPatient;
-  window.toggleNotif    = toggleNotif;
+  // ─── EXPOSE GLOBALS ───
+  window.filterDepts             = filterDepts;
+  window.setFilter               = setFilter;
+  window.showPage                = showPage;
+  window.openDept                = openDept;
+  window.switchTab               = switchTab;
+  window.selectCounter           = selectCounter;
+  window.recallQueue             = recallQueue;
+  window.skipQueue               = skipQueue;
+  window.callPatient             = callPatient;
+  window.deletePatient           = deletePatient;
+  window.toggleDoctorAvailability= toggleDoctorAvailability;
+  window.setCutoffTime           = setCutoffTime;
+  window.continueQueue           = continueQueue;
+  window.closeQueue              = closeQueue;
+  window.toggleAI                = toggleAI;
+  window.acceptAI                = acceptAI;
+  window.openModal               = openModal;
+  window.closeModal              = closeModal;
+  window.closeModalOuter         = closeModalOuter;
+  window.addPatient              = addPatient;
+  window.toggleNotif             = toggleNotif;
 
   // ─── INIT ───
-  renderDepts();
-  renderCounters();
-  renderNextList();
-  renderTable();
-  renderQueueControls();
-  fetchDepartmentStats().then(renderStats).catch(err => console.error(err));
-
-} // end isDashboard
+  (async function initDashboard() {
+    try {
+      await fetchBootstrapData();
+      renderDepts();
+      renderQueueControls();
+      if (departments.length > 0) {
+        activeDept = departments[0].id;
+        document.getElementById('active-dept-name').textContent = departments[0].name;
+        await fetchDepartmentQueues(activeDept);
+        await fetchDepartmentStats(activeDept);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to load dashboard data');
+    }
+    renderCounters();
+    renderNextList();
+    renderTable();
+    renderNowServingCard();
+    renderStats();
+    renderQueueControls();
+  })();
+} // END isDashboard
 
 
 // ════════════════════════════════════════════════════════
